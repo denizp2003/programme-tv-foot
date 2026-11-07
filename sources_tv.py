@@ -111,7 +111,10 @@ def lives_matchtv(maintenant):
         except Exception as e:
             notes.append(f"{jour:%d/%m} : {str(e).splitlines()[0][:60]}")
             continue
-        notes.append(f"{jour:%d/%m} : {len(texte)} car., entête {'Матч ТВ' in texte}")
+        _ls = [l.strip() for l in texte.splitlines() if l.strip()]
+        _ks = [i for i, l in enumerate(_ls) if l.lower() == "матч тв"]
+        _ap = " / ".join(_ls[_ks[0] + 1:_ks[0] + 3])[:90] if _ks else "-"
+        notes.append(f"{jour:%d/%m} : {len(_ls)} lignes, {len(_ks)} titre(s), après : {_ap}")
         for x in parse_matchtv(texte, jour):
             if (x["debut"], x["titre"]) not in vus:
                 vus.add((x["debut"], x["titre"]))
