@@ -13,12 +13,12 @@ TRT_URL = "https://www.trtspor.com.tr/yayin-akisi/trt-spor"
 TZ_TR = ZoneInfo("Europe/Istanbul")
 TZ_RU = ZoneInfo("Europe/Moscow")
 
-def fetch_text(url, attente_ms=4000):
+def fetch_text(url, attente_ms=8000):
     from playwright.sync_api import sync_playwright  # import tardif : seulement en exécution réelle
     with sync_playwright() as p:
         nav = p.chromium.launch()
         page = nav.new_page(viewport={"width": 1280, "height": 900})
-        page.goto(url, wait_until="networkidle", timeout=45000)
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(attente_ms)
         texte = page.inner_text("body")
         nav.close()
@@ -96,16 +96,29 @@ def parse_matchtv(texte, jour_tv):
 
 
 def lives_trt(maintenant):
-    return parse_trt(fetch_text(TRT_URL), maintenant.astimezone(TZ_TR).date())
+    texte = fetch_text(TRT_URL)
+    r = parse_trt(texte, maintenant.astimezone(TZ_TR).date())
+    if not r:
+        debut = re.sub(r"\s+", " ", texte)[:100]
+        raise RuntimeError(f"rien reconnu (texte de {len(texte)} caractères, début : {debut})")
+    return r
 
 
 def lives_matchtv(maintenant):
     aujourdhui = maintenant.astimezone(TZ_RU).date()
-    vus, out = set(), []
+    vus, out, notes = set(), [], []
     for delta in (-1, 0, 1, 2, 3, 4):
         jour = aujourdhui + timedelta(days=delta)
-        for x in parse_matchtv(fetch_text(SPORTBOX_URL.format(d=jour.isoformat())), jour):
+        try:
+            texte = fetch_text(SPORTBOX_URL.format(d=jour.isoformat()))
+        except Exception as e:
+            notes.append(f"{jour:%d/%m} : {str(e).splitlines()[0][:60]}")
+            continue
+        notes.append(f"{jour:%d/%m} : {len(texte)} car., entête {'Матч ТВ' in texte}")
+        for x in parse_matchtv(texte, jour):
             if (x["debut"], x["titre"]) not in vus:
                 vus.add((x["debut"], x["titre"]))
                 out.append(x)
+    if not out:
+        raise RuntimeError("rien reconnu (" + " ; ".join(notes) + ")")
     return out
