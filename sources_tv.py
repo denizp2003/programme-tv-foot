@@ -58,7 +58,7 @@ SPORTBOX_URL = "https://news.sportbox.ru/tv?date={d}"
 _AUTRES_CHAINES = ("матч премьер", "матч страна", "матч арена", "футбол 1", "футбол 2", "футбол 3",
                    "матч! премьер", "матч! страна", "матч! арена", "матч! футбол", "sportbox.ru",
                    "матч! боец", "матч! игра", "матч! наш спорт")
-_HEURE = re.compile(r"^\d{2}:\d{2}$")
+_LIGNE = re.compile(r"^(\d{2}:\d{2})\s+(.+)$")
 _PAS_FOOT = ("волейбол", "гандбол", "регби", "хоккей", "баскетбол", "бокс", "единоборств", "атлетик",
              "водное поло", "плаван", "гимнаст", "теннис", "биатлон", "автоспорт", "формул", "бильярд",
              "футзал", "пляжный", "падел", "прыжки", "гонки", "шахмат")
@@ -68,30 +68,27 @@ def parse_matchtv(texte, jour_tv):
     """jour_tv : date de la journée TV (04:00 de ce jour à 03:59 du lendemain, heure de Moscou)."""
     lignes = [l.strip() for l in texte.splitlines() if l.strip()]
     try:
-        k = next(i for i, l in enumerate(lignes) if l == "Матч ТВ")
+        k = next(i for i, l in enumerate(lignes) if l.lower() == "матч тв")
     except StopIteration:
         return []
     out = []
-    i = k + 1
-    while i < len(lignes) - 1:
-        l = lignes[i]
-        if l.lower() in _AUTRES_CHAINES:
-            break
-        if _HEURE.match(l):
-            titre = lignes[i + 1]
-            h, m = map(int, l.split(":"))
-            d = jour_tv + timedelta(days=1) if (h, m) < (4, 0) else jour_tv
-            bas = titre.lower()
-            direct = "прямая трансляция" in bas or bas.endswith("live")
-            foot = "футбол" in bas or re.search(r"\S\s[-–]\s\S", titre)
-            if direct and foot and not any(x in bas for x in _PAS_FOOT):
-                debut = datetime(d.year, d.month, d.day, h, m, tzinfo=TZ_RU)
-                out.append({"chaine": "Матч ТВ", "pays": "Russie", "titre": titre[:140],
-                            "debut": debut.astimezone(timezone.utc), "en_cours": False,
-                            "url": SPORTBOX_URL.format(d=jour_tv.isoformat())})
-            i += 2
-        else:
-            i += 1
+    for l in lignes[k + 1:]:
+        if not _LIGNE.match(l) and l.upper() == l and len(l) < 40:
+            break  # titre de la chaîne suivante (en majuscules)
+        m = _LIGNE.match(l)
+        if not m:
+            continue
+        h, mi = map(int, m.group(1).split(":"))
+        titre = m.group(2)
+        d = jour_tv + timedelta(days=1) if (h, mi) < (4, 0) else jour_tv
+        bas = titre.lower()
+        direct = "прямая трансляция" in bas or bas.endswith("live")
+        foot = "футбол" in bas or re.search(r"\S\s[-–]\s\S", titre)
+        if direct and foot and not any(x in bas for x in _PAS_FOOT):
+            debut = datetime(d.year, d.month, d.day, h, mi, tzinfo=TZ_RU)
+            out.append({"chaine": "Матч ТВ", "pays": "Russie", "titre": titre[:140],
+                        "debut": debut.astimezone(timezone.utc), "en_cours": False,
+                        "url": SPORTBOX_URL.format(d=jour_tv.isoformat())})
     return out
 
 
