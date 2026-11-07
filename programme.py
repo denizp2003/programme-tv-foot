@@ -26,8 +26,13 @@ CHAINES = [
 ]
 # Si un handle est faux, le script cherche la chaîne par son nom et affiche son identifiant
 # dans la console : le copier ici sous la forme {"id": "UC...", ...} pour fixer la chaîne.
-# Mots-clés pour ne garder que le foot ; liste vide = tout garder.
-MOTS_CLES = ["x ", " vs ", "ao vivo", "futebol", "campeonato", "copa", "liga", "brasileirão"]
+# Foot uniquement : le titre doit contenir un « x » ou « vs » entre deux équipes (ou « futebol »)
+# et aucun mot d'un autre sport.
+MOTS_FOOT = [" x ", " vs ", "futebol"]
+MOTS_AUTRES_SPORTS = ["futsal", "basquete", "basket", "nfl", "nba", "boxe", "ufc", "mma", "vôlei", "volei",
+                      "tênis", "tenis", "handebol", "olímpic", "olimpic", "fórmula", "formula 1", " f1 ",
+                      "rugby", "ciclismo", "atletismo", "natação", "judô", "sinuca", "e-sports", "esports"]
+MANUEL = "manuel.txt"  # lignes : JJ/MM HH:MM | match | chaîne (heure de Paris)
 FENETRE_HEURES = 96  # 4 jours : lives en cours + à venir sur cette durée
 TZ = ZoneInfo("Europe/Paris")
 API = "https://www.googleapis.com/youtube/v3/"
@@ -63,6 +68,36 @@ def lives_de_la_chaine(chaine):
     return extraire_lives(vids.get("items", []), chaine)
 
 
+def est_foot(titre):
+    t = " " + titre.lower() + " "
+    return any(m in t for m in MOTS_FOOT) and not any(m in t for m in MOTS_AUTRES_SPORTS)
+
+
+def lire_manuel(chemin, maintenant):
+    """Matchs saisis à la main (annonces vues sur les réseaux). Retourne (lives, erreurs)."""
+    if not os.path.exists(chemin):
+        return [], []
+    out, erreurs = [], []
+    for n, ligne in enumerate(open(chemin, encoding="utf-8"), 1):
+        ligne = ligne.strip()
+        if not ligne or ligne.startswith("#"):
+            continue
+        try:
+            quand, match, chaine = [p.strip() for p in ligne.split("|")]
+            d = datetime.strptime(quand, "%d/%m %H:%M")
+            debut = d.replace(year=maintenant.year, tzinfo=TZ)
+            if debut < maintenant - timedelta(days=180):
+                debut = debut.replace(year=maintenant.year + 1)
+            if not match or not chaine:
+                raise ValueError("vide")
+        except ValueError:
+            erreurs.append(f"{chemin} ligne {n} : format attendu « JJ/MM HH:MM | match | chaîne »")
+            continue
+        out.append({"chaine": chaine, "pays": "annonce manuelle", "titre": match,
+                    "debut": debut.astimezone(timezone.utc), "en_cours": False, "url": ""})
+    return out, erreurs
+
+
 def extraire_lives(videos, chaine, maintenant=None):
     maintenant = maintenant or datetime.now(timezone.utc)
     limite = maintenant + timedelta(hours=FENETRE_HEURES)
@@ -79,7 +114,7 @@ def extraire_lives(videos, chaine, maintenant=None):
         if not en_cours and not (maintenant - timedelta(hours=1) <= debut <= limite):
             continue
         titre = v["snippet"]["title"]
-        if MOTS_CLES and not any(m in (titre.lower() + " ") for m in MOTS_CLES):
+        if not est_foot(titre):
             continue
         out.append({
             "chaine": chaine["nom"], "pays": chaine["pays"], "titre": titre,
@@ -87,6 +122,11 @@ def extraire_lives(videos, chaine, maintenant=None):
             "url": "https://www.youtube.com/watch?v=" + v["id"],
         })
     return out
+
+
+def lien(l):
+    t = html.escape(l["titre"])
+    return f'<a href="{html.escape(l["url"])}">{t}</a>' if l["url"] else t
 
 
 def rendre_html(lives, erreurs):
@@ -102,7 +142,7 @@ def rendre_html(lives, erreurs):
         badge = ' <b class="live">EN DIRECT</b>' if l["en_cours"] else ""
         lignes.append(
             f'<div class="m"><span class="h">{loc.strftime("%H:%M")}</span> '
-            f'<a href="{html.escape(l["url"])}">{html.escape(l["titre"])}</a>{badge}'
+            f'{lien(l)}{badge}'
             f'<br><small>{html.escape(l["chaine"])} · {html.escape(l["pays"])}</small></div>'
         )
     if not lives:
@@ -139,6 +179,10 @@ def main():
             lives += trouves
         except Exception as e:
             erreurs.append(f"{nom} : {e}")
+    manuels, err_m = lire_manuel(MANUEL, maintenant)
+    lives += [x for x in manuels
+              if maintenant - timedelta(hours=2) <= x["debut"] <= maintenant + timedelta(hours=FENETRE_HEURES)]
+    erreurs += err_m
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(rendre_html(lives, erreurs))
     print(f"{len(lives)} matchs, {len(erreurs)} erreur(s)")
