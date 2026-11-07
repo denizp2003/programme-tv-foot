@@ -20,14 +20,15 @@ CHAINES = [
     {"nom": "GE TV", "handle": "getv", "pays": "Brésil"},
     {"nom": "ESPN Brasil", "handle": "ESPNBrasil", "pays": "Brésil"},
     {"nom": "Canal GOAL Brasil", "handle": "CanalGOAL", "pays": "Brésil"},
-    {"nom": "SBT Sports", "handle": "sbtsports", "pays": "Brésil"},
-    {"nom": "XSports", "handle": "xsports", "pays": "Brésil"},
+    {"nom": "SBT Sports", "handle": "SBTSports", "pays": "Brésil"},
+    {"nom": "XSports", "handle": "xsports.brasil", "pays": "Brésil"},
+    {"nom": "TNT Sports Brasil", "handle": "TNTSportsBR", "pays": "Brésil"},
 ]
 # Si un handle est faux, le script cherche la chaîne par son nom et affiche son identifiant
 # dans la console : le copier ici sous la forme {"id": "UC...", ...} pour fixer la chaîne.
 # Mots-clés pour ne garder que le foot ; liste vide = tout garder.
 MOTS_CLES = ["x ", " vs ", "ao vivo", "futebol", "campeonato", "copa", "liga", "brasileirão"]
-FENETRE_HEURES = 36  # lives affichés : en cours + à venir sur cette durée
+FENETRE_HEURES = 96  # 4 jours : lives en cours + à venir sur cette durée
 TZ = ZoneInfo("Europe/Paris")
 API = "https://www.googleapis.com/youtube/v3/"
 
@@ -108,12 +109,12 @@ def rendre_html(lives, erreurs):
         lignes.append("<p>Aucun match trouvé.</p>")
     err = "".join(f"<p class='err'>⚠ {html.escape(e)}</p>" for e in erreurs)
     return f"""<!doctype html><html lang="fr"><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>Matchs du jour</title>
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Matchs des 4 prochains jours</title>
 <style>body{{font:16px system-ui;max-width:640px;margin:1rem auto;padding:0 1rem}}
 .m{{padding:.5rem 0;border-bottom:1px solid #ddd}}.h{{font-weight:700;margin-right:.5rem}}
 .live{{color:#fff;background:#d00;padding:0 .3rem;border-radius:3px;font-size:.75rem}}
 .err{{color:#b00}}small{{color:#666}}</style>
-<h1>Matchs diffusés</h1><small>Mis à jour {maj} (heure de Paris)</small>
+<h1>Matchs des 4 prochains jours</h1><small>Mis à jour {maj} (heure de Paris)</small>
 {"".join(lignes)}{err}</html>"""
 
 
@@ -131,8 +132,11 @@ def main():
     maintenant = datetime.now(timezone.utc)
     for nom, f in (("TRT Spor", sources_tv.lives_trt), ("Match TV", sources_tv.lives_matchtv)):
         try:
-            lives += [x for x in f(maintenant)
-                      if maintenant - timedelta(hours=2) <= x["debut"] <= maintenant + timedelta(hours=FENETRE_HEURES)]
+            trouves = [x for x in f(maintenant)
+                       if maintenant - timedelta(hours=2) <= x["debut"] <= maintenant + timedelta(hours=FENETRE_HEURES)]
+            if not trouves:
+                erreurs.append(f"{nom} : aucun match trouvé (page lue, mais rien de reconnu)")
+            lives += trouves
         except Exception as e:
             erreurs.append(f"{nom} : {e}")
     with open("index.html", "w", encoding="utf-8") as f:
