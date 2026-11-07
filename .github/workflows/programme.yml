@@ -1,4 +1,4 @@
-name: Programme du jour
+name: Programme 4 jours
 on:
   schedule:
     - cron: "0 5 * * *"   # 05:00 UTC, soit 06:00 ou 07:00 à Paris selon la saison
