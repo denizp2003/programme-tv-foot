@@ -1,0 +1,4 @@
+# Matchs annoncés à la main (réseaux sociaux, bannières).
+# Une ligne par match : JJ/MM HH:MM | match | chaîne      (heure de Paris)
+# Les lignes qui commencent par # sont ignorées. Les matchs passés disparaissent tout seuls.
+07/11 22:00 | Inter Miami x Charlotte | TNT Sports Brasil
