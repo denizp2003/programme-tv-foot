@@ -9,13 +9,9 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 TRT_URL = "https://www.trtspor.com.tr/yayin-akisi/trt-spor"
-MATCHTV_URL = "https://matchtv.ru/tvguide"
+
 TZ_TR = ZoneInfo("Europe/Istanbul")
 TZ_RU = ZoneInfo("Europe/Moscow")
-
-MOIS_RU = {"января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
-           "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12}
-
 
 def fetch_text(url, attente_ms=4000):
     from playwright.sync_api import sync_playwright  # import tardif : seulement en exécution réelle
@@ -56,41 +52,46 @@ def parse_trt(texte, aujourdhui):
     return out
 
 
-# ---------- Match TV (bloc « Главное на неделе ») ----------
-_MTV_JOUR = r"(?:Сегодня|Завтра|\d{1,2}\s+[а-я]+)"
-_MTV_ENTREE = re.compile(rf"({_MTV_JOUR}),\s*(\d{{2}}:\d{{2}})\s+(.*?)(?=\s{_MTV_JOUR},\s*\d{{2}}:\d{{2}}\s|$)")
-_COTES = re.compile(r"\d\.\d{2}\s\d\.\d{2}\s\d\.\d{2}\s18\+\sРеклама")
-_FOOT = ("футбол", "лига", "чемпионат", "кубок", "тур ")
-_PAS_FOOT = ("единоборств", "хоккей", "биатлон", "теннис", "баскетбол", "формула")
+# ---------- Match TV (chaîne principale « Матч ТВ » uniquement) ----------
+# Source : grille par chaîne de news.sportbox.ru. La journée TV commence à 04:00 (Moscou).
+SPORTBOX_URL = "https://news.sportbox.ru/tv?date={d}"
+_AUTRES_CHAINES = ("матч премьер", "матч страна", "матч арена", "футбол 1", "футбол 2", "футбол 3",
+                   "матч! премьер", "матч! страна", "матч! арена", "матч! футбол", "sportbox.ru",
+                   "матч! боец", "матч! игра", "матч! наш спорт")
+_HEURE = re.compile(r"^\d{2}:\d{2}$")
+_PAS_FOOT = ("волейбол", "гандбол", "регби", "хоккей", "баскетбол", "бокс", "единоборств", "атлетик",
+             "водное поло", "плаван", "гимнаст", "теннис", "биатлон", "автоспорт", "формул", "бильярд",
+             "футзал", "пляжный", "падел", "прыжки", "гонки", "шахмат")
 
 
-def parse_matchtv(texte, aujourdhui):
-    """aujourdhui : date locale à Moscou. Ne lit que les entrées datées explicitement."""
-    t = re.sub(r"\s+", " ", texte)
-    k = t.find("Сегодня,")
-    t = t[k:] if k != -1 else t
+def parse_matchtv(texte, jour_tv):
+    """jour_tv : date de la journée TV (04:00 de ce jour à 03:59 du lendemain, heure de Moscou)."""
+    lignes = [l.strip() for l in texte.splitlines() if l.strip()]
+    try:
+        k = next(i for i, l in enumerate(lignes) if l == "Матч ТВ")
+    except StopIteration:
+        return []
     out = []
-    for jour_txt, hhmm, reste in _MTV_ENTREE.findall(t):
-        if jour_txt == "Сегодня":
-            d = aujourdhui
-        elif jour_txt == "Завтра":
-            d = aujourdhui + timedelta(days=1)
+    i = k + 1
+    while i < len(lignes) - 1:
+        l = lignes[i]
+        if l.lower() in _AUTRES_CHAINES:
+            break
+        if _HEURE.match(l):
+            titre = lignes[i + 1]
+            h, m = map(int, l.split(":"))
+            d = jour_tv + timedelta(days=1) if (h, m) < (4, 0) else jour_tv
+            bas = titre.lower()
+            direct = "прямая трансляция" in bas or bas.endswith("live")
+            foot = "футбол" in bas or re.search(r"\S\s[-–]\s\S", titre)
+            if direct and foot and not any(x in bas for x in _PAS_FOOT):
+                debut = datetime(d.year, d.month, d.day, h, m, tzinfo=TZ_RU)
+                out.append({"chaine": "Матч ТВ", "pays": "Russie", "titre": titre[:140],
+                            "debut": debut.astimezone(timezone.utc), "en_cours": False,
+                            "url": SPORTBOX_URL.format(d=jour_tv.isoformat())})
+            i += 2
         else:
-            n, mois = jour_txt.split()
-            if mois not in MOIS_RU:
-                continue
-            d = aujourdhui.replace(month=MOIS_RU[mois], day=int(n))
-            if d < aujourdhui - timedelta(days=30):
-                d = d.replace(year=d.year + 1)
-        reste = _COTES.sub("", reste).strip()
-        titre = reste[:140]
-        bas = titre.lower()
-        if any(x in bas for x in _PAS_FOOT) or not any(x in bas for x in _FOOT):
-            continue
-        h, m = map(int, hhmm.split(":"))
-        debut = datetime(d.year, d.month, d.day, h, m, tzinfo=TZ_RU)
-        out.append({"chaine": "Матч ТВ", "pays": "Russie", "titre": titre,
-                    "debut": debut.astimezone(timezone.utc), "en_cours": False, "url": MATCHTV_URL})
+            i += 1
     return out
 
 
@@ -99,4 +100,12 @@ def lives_trt(maintenant):
 
 
 def lives_matchtv(maintenant):
-    return parse_matchtv(fetch_text(MATCHTV_URL), maintenant.astimezone(TZ_RU).date())
+    aujourdhui = maintenant.astimezone(TZ_RU).date()
+    vus, out = set(), []
+    for delta in (-1, 0, 1, 2, 3, 4):
+        jour = aujourdhui + timedelta(days=delta)
+        for x in parse_matchtv(fetch_text(SPORTBOX_URL.format(d=jour.isoformat())), jour):
+            if (x["debut"], x["titre"]) not in vus:
+                vus.add((x["debut"], x["titre"]))
+                out.append(x)
+    return out
